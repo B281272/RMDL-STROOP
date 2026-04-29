@@ -1,4 +1,4 @@
-# Assessment 2 – RMDL
+# Assessment 2 - RMDL (B281272)
 
 This repository contains all materials for Assessment 2, including the data, analysis code, and final report.
 
