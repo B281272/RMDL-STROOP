@@ -59,7 +59,7 @@ A Stroop interference effect (RH1) would be indicated by a positive incongruent 
 
 ### Open Research Statement
 
-All data, and analysis code are available at [https://github.com/emilyjose0455-commits/RMDL-STROOP]. The experiment was administered via Testable [https://tstbl.co/425-529].
+All data, and analysis code are available at [https://github.com/B281272/RMDL-STROOP]. The experiment was administered via Testable [https://tstbl.co/425-529].
 
 ## Data
 
