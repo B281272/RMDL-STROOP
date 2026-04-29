@@ -1,0 +1,446 @@
+---
+title: "RMDL Assessment 2: Data Analysis Report"
+authors:
+  - name: B281272
+bibliography: references.bib
+execute: 
+  echo: true
+
+format:
+  html: default
+  pdf: default
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(tidyverse)
+library(brms)
+library(posterior)
+```
+
+## Background
+
+The Stroop task is one of the most robust and widely replicated paradigms in cognitive psychology [@macleod_half_1991]. In the prototypical version, participants are presented with colour words (e.g., *RED*, *BLUE*, *GREEN*) printed in either matching (congruent) or mismatching (incongruent) ink colours and are asked to indicate the ink colour while ignoring the word meaning. Participants are systematically slower and less accurate on incongruent trials than on congruent trials, which is called the stroop interference effect [@stroop_studies_1992]. This effect is generally attributed to the automaticity of reading as skilled readers process word meaning involuntarily, causing semantic competition with the colour response [@macleod_half_1991].
+
+A theoretically important extension of this paradigm concerns whether the strength of the interference effect varies between native (L1) and non-native (L2) speakers of the task language. For L1 speakers, lexical access is assumed to be highly automatic, generating strong interference. For L2 speakers, automaticity may be reduced, potentially attenuating the effect [@kroll_category_1994]. Evidence is mixed, with some studies finding smaller effects in L2 speakers [@rosselli_stroop_2002], while others find comparable effects when L2 proficiency is high [@groot_language_2011]. The present study administers an English-language Stroop task to L1 and L2 English speakers, examining reaction time (RT) and accuracy.
+
+### Research Questions/Hypotheses
+
+**RQ1:** Do participants show a Stroop interference effect, such that RTs are longer and accuracy is lower on incongruent trials compared with congruent or neutral trials?
+
+**RQ2:** Does language background (L1 vs. L2) modulate the magnitude of the Stroop interference effect?
+
+**RH1:** Participants will be slower and less accurate on incongruent trials than on congruent or neutral trials.
+
+**RH2:** L1 English speakers will show a larger Stroop interference effect than L2 English speakers, reflecting greater automaticity of reading in a dominant language.
+
+## Methods
+
+### Participants
+
+Nineteen participants were recruited via convenience sampling, including 11 native English speakers (L1 group) and 8 non-native English speakers (L2 group). Although L2 participants had acquired English after their first language, all self-reported high proficiency (Advanced, n = 6 or Native/Near-native, n = 2). Participants provided informed consent prior to taking part.
+
+### Materials and Procedure
+
+The Stroop task was built and administered using testable.org. Stimuli consisted of six words, three colour words (*RED*, *BLUE*, *GREEN*) and three neutral words (*CAR*, *SHOE*, *HOUSE*), each displayed in one of three ink colours (red, blue, green). This produced three trial types: congruent (colour word in matching ink), incongruent (colour word in non-matching ink), and neutral (neutral word in any ink).
+
+Participants responded using arrow keys to indicate the ink colour (left = red, up = blue, right = green). The experiment was accessed via a web link. After a 6-trial practice block with feedback, participants completed 72 main trials (24 per condition) without feedback. The session took approximately 5-10 minutes to complete. After completing the task, participants filled in a short questionnaire reporting language background and self-rated English proficiency.
+
+### Statistical Analysis
+
+All analyses were conducted in R using the brms package for Bayesian regression modelling. Practice trials were excluded.
+
+**For RQ1**, two Bayesian regression models were fitted, one with log-transformed RT on correct trials as the outcome (Gaussian family), and one with trial-level accuracy as the outcome (Bernoulli family). A Gaussian family was used for log-transformed RT to reduce skew, while a Bernoulli family was used for accuracy because the outcome is binary (each trial is either correct or incorrect). Both models included condition (neutral, congruent, incongruent) as a predictor with neutral as the reference level, and by-participant varying intercepts and slopes for condition.
+
+A Stroop interference effect (RH1) would be indicated by a positive incongruent coefficient and a negative congruent coefficient in the RT model (longer RTs), and a negative incongruent coefficient in the accuracy model (lower accuracy), with 90% credible intervals that exclude zero.
+
+**For RQ2**, language group (L1 vs L2) and its interaction with condition were added to both models. L1 was set as the reference level. Posterior draws were used to compute the Stroop effect (incongruent minus congruent) within each group and the difference between groups (L1 minus L2). Evidence for RH2 would be a positive difference (L1 minus L2), with 90% credible intervals that exclude zero.
+
+### Open Research Statement
+
+All data, and analysis code are available at [https://github.com/B281272/RMDL-STROOP]. The experiment was administered via Testable, accessible at [https://tstbl.co/425-529].
+
+## Data
+
+### Read and process the data
+
+The data are downloaded from Testable in long format (one row per trial per participant), and read using read_csv().
+
+```{r}
+#| label: read-data
+stroop_raw <- read_csv("data/425529_260424_172114_long.csv")
+```
+
+The data required some processing. Language group was stored in a separate set of rows (rowNo 82) rather than as a column, so I extracted it and joined it back to the trial rows. I then created a single condition column from condition1 and condition2, and removed practice trials.
+
+```{r}
+#| label: process data
+
+# Extract language group from rowNo 82 (responseCode: 1 = L1, 2 = L2)
+lang_group <- stroop_raw |>
+  filter(rowNo == 82) |>
+  mutate(language_group = ifelse(responseCode == 1, "L1", "L2")) |>
+  select(filename, language_group)
+
+# Keep critical and filler trials; derive condition; join language group
+stroop <- stroop_raw |>
+  filter(condition1 %in% c("critical", "fillers")) |>
+  mutate(condition = ifelse(is.na(condition2), "neutral", condition2)) |>
+  merge(lang_group, by = "filename") |>
+  mutate(
+    condition      = factor(condition, levels = c("neutral", "congruent", "incongruent")),
+    language_group = factor(language_group, levels = c("L1", "L2"))
+  ) |>
+  select(participant = filename, language_group, condition,
+         word = stim1, ink_color = textColor, RT, correct)
+```
+
+The relevant columns following data processing include:
+
+-   **participant**: participant identifier derived from the data filename
+-   **language_group**: L1 (native English) or L2 (non-native English), derived from responseCode on row 82 (1 = L1, 2 = L2)
+-   **condition**: trial type (neutral, congruent, incongruent), derived from condition1 and condition2
+-   **word**: the stimulus word displayed (RED, BLUE, GREEN, CAR, SHOE, HOUSE), from stim1
+-   **ink_color**: the ink colour of the stimulus (red, blue, green), from textColor
+-   **RT**: reaction time in milliseconds
+-   **correct**: whether the response was correct (1) or incorrect (0)
+
+### Plot the data
+
+The line plot below shows conditions (neutral, congruent, incongruent) on the x-axis and mean RT on the y-axis. Separate lines and colours represent language group (L1 in green and L2 in orange). Points indicate group means, and vertical error bars represent ±1 standard deviation around the mean.
+
+In terms of patterns, RTs are highest in the incongruent condition for both groups, indicating slower responses when the word meaning conflicts with the ink colour, consistent with a Stroop interference effect. Congruent trials show the fastest responses, with neutral trials falling in between. There is also a difference between language groups. L1 speakers show a larger increase in RT from congruent to incongruent trials compared to L2 speakers, suggesting a larger Stroop effect in L1. In contrast, L2 speakers show a smaller difference between conditions, with relatively similar RTs in neutral and congruent trials. However, the error bars are relatively large and overlap substantially across conditions and groups, indicating considerable variability and suggesting that these differences should be interpreted with caution.
+
+```{r}
+#| label: fig-rt
+stroop |>
+  group_by(language_group, condition) |>
+  summarise(
+    mean_RT = mean(RT),
+    sd_RT   = sd(RT),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(condition, mean_RT,
+             colour = language_group, group = language_group)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_RT - sd_RT,
+                    ymax = mean_RT + sd_RT), width = 0.1) +
+  scale_colour_brewer(palette = "Dark2") +
+  labs(
+    x = "Condition", y = "Mean RT (ms)", colour = "Language group",
+    title = "Mean RT by condition and language group"
+  )
+```
+
+The plot below is a bar chart showing conditions (neutral, congruent, incongruent) on the x-axis and mean accuracy on the y-axis. Bars are grouped and colour-coded by language group (again L1 in green and L2 in orange), with bars placed side by side within each condition to allow direct comparison between groups. In terms of patterns, accuracy is high across all conditions for both groups, indicating generally good task performance. However, accuracy is lowest in the incongruent condition for both L1 and L2 speakers, consistent with a Stroop interference effect in which conflicting word meaning and ink colour reduce performance. Neutral and congruent conditions show very similar, near-ceiling levels of accuracy.
+
+There are also small differences between language groups. L2 speakers show slightly higher accuracy than L1 speakers across conditions, particularly in the incongruent condition. However, these differences are relatively small in magnitude, suggesting that any group differences in accuracy are limited compared to the overall effect of condition.
+
+```{r}
+#| label: fig-acc
+stroop |>
+  group_by(language_group, condition) |>
+  summarise(mean_acc = mean(correct), .groups = "drop") |>
+  ggplot(aes(condition, mean_acc, fill = language_group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    x = "Condition", y = "Mean accuracy",
+    title = "Accuracy by condition and language group"
+  )
+```
+
+### Summarise the data
+
+The table below reports mean reaction time (RT), standard deviation, and mean accuracy by condition, collapsed across language group. Congruent trials show the fastest responses (M = 642.2 ms, SD = 272.7) and the highest accuracy (M = 0.982). Neutral trials are slower (M = 685.4 ms, SD = 317.1) with slightly lower accuracy (M = 0.976). Incongruent trials show the slowest responses (M = 760.6 ms, SD = 333.2) and the lowest accuracy (M = 0.904). Each condition includes 456 observations. Overall, RT increases and accuracy decreases from congruent to incongruent trials, with neutral trials falling between these conditions. This pattern is consistent with a Stroop interference effect.
+
+```{r}
+#| label: summary-overall
+stroop |>
+  group_by(condition) |>
+  summarise(
+    mean_RT  = round(mean(RT), 1),
+    sd_RT    = round(sd(RT), 1),
+    mean_acc = round(mean(correct), 3),
+    n        = n()
+  )
+```
+
+While the overall pattern is clear, breaking the data down by language group shows whether this effect differs between L1 and L2 speakers. The table below reports mean reaction time (RT), standard deviation, and mean accuracy by language group (L1, L2) and condition (neutral, congruent, incongruent). For L1 speakers, congruent trials show the fastest responses (M = 621.8 ms, SD = 201.6) and highest accuracy (M = 0.989), while incongruent trials are slower (M = 788.8 ms, SD = 317.7) and less accurate (M = 0.894). Neutral trials fall between these conditions (RT: M = 684.2 ms, SD = 277.3; accuracy: M = 0.973). For L2 speakers, a similar pattern is observed. Congruent trials are fastest (M = 670.3 ms, SD = 346.3) with high accuracy (M = 0.974), while incongruent trials are slower (M = 721.8 ms, SD = 350.5) and less accurate (M = 0.917). Neutral trials again fall between these conditions (RT: M = 687.0 ms, SD = 365.6; accuracy: M = 0.979).
+
+Comparing groups, the increase in RT from congruent to incongruent trials is larger for L1 speakers (approximately 167 ms) than for L2 speakers (approximately 52 ms), suggesting a larger Stroop interference effect in L1. Differences in accuracy between groups are smaller, although L2 speakers show slightly higher accuracy in the incongruent condition. Sample sizes differ across groups, with 264 observations per condition for L1 and 192 for L2. Overall, both groups show the expected Stroop pattern of slower and less accurate responses in incongruent trials, with a larger RT effect in L1 speakers.
+
+```{r}
+#| label: summary-by-group
+stroop |>
+  group_by(language_group, condition) |>
+  summarise(
+    mean_RT  = round(mean(RT), 1),
+    sd_RT    = round(sd(RT), 1),
+    mean_acc = round(mean(correct), 3),
+    n        = n(),
+)
+```
+
+## Regression modelling
+
+To address the research questions, a series of Bayesian regression models were fitted to examine the effects of condition and language group on reaction time and accuracy. Reaction time was analysed using log-transformed RT on correct trials with a Gaussian likelihood, while accuracy was analysed at the trial level using a Bernoulli likelihood. Models were first fitted to test the overall Stroop effect, and then extended to include language group and its interaction with condition to assess whether the size of the effect differs between L1 and L2 speakers. All models included by-participant varying intercepts and slopes for condition to account for individual differences. Posterior draws were used to compute key contrasts, including the Stroop effect and differences between language groups.
+
+### RT Model 1: overall Stroop effect
+
+A Bayesian Gaussian regression model was fitted to log-transformed reaction times (log(RT)) for correct trials only. RT was log-transformed to reduce skew and better meet the assumptions of a Gaussian model. Condition (neutral, congruent, incongruent) was included as a predictor, with neutral as the reference level. The model also included by-participant random intercepts and slopes for condition, allowing the effect of condition to vary across participants. This accounts for individual differences in overall response speed and in the size of the Stroop effect.
+
+```{r}
+#| label: rt-bm-1
+my_seed <- 1234
+
+stroop_correct <- stroop |> filter(correct == 1)
+
+rt_bm_1 <- brm(
+  log(RT) ~ condition + (condition | participant),
+  family = gaussian,
+  data   = stroop_correct,
+  seed   = my_seed,
+  cores  = 4,
+)
+```
+
+The plot below shows the estimated marginal means of log(RT) for each condition from the model, with points indicating posterior means and vertical intervals representing credible intervals around these estimates.
+
+In terms of patterns, log(RT) is lowest in the congruent condition, higher in the neutral condition, and highest in the incongruent condition. Responses are therefore fastest for congruent trials and slowest for incongruent trials. The difference between congruent and incongruent conditions is particularly pronounced, consistent with a Stroop interference effect. There is some overlap between the credible intervals for neutral and congrent conditions, suggesting a smaller difference between these two conditions compared to the difference involving incongruent trials.
+
+```{r}
+#| label: fig-ce-rt-bm-1
+conditional_effects(rt_bm_1, "condition")
+```
+
+Posterior draws were extracted to compute key contrasts, including each condition relative to neutral and the core Stroop effect (incongruent minus congruent).
+
+```{r}
+#| label: draws-rt-bm-1
+rt_bm_1_draws <- as_draws_df(rt_bm_1) |>
+  mutate(
+    congruent_vs_neutral   = b_conditioncongruent,
+    incongruent_vs_neutral = b_conditionincongruent,
+    stroop_effect          = b_conditionincongruent - b_conditioncongruent
+  )
+
+rt_bm_1_draws |>
+  select(congruent_vs_neutral, incongruent_vs_neutral, stroop_effect) |>
+  pivot_longer(everything()) |>
+  group_by(name) |>
+  summarise(
+    mean  = round(mean(value), 3),
+    lower = round(quantile2(value, probs = 0.05), 3),
+    upper = round(quantile2(value, probs = 0.95), 3)
+  )
+```
+
+The posterior summaries show that the congruent condition has lower log(RT) than the neutral condition (mean = -0.062, 90% CrI [-0.105, -0.019]), suggesting faster responses in congruent trials. The incongruent condition shows higher log(RT) than the neutral condition (mean = 0.089, 90% CrI [0.039, 0.141]), suggesting slower responses in incongruent trials. The Stroop effect (incongruent minus congruent) has a mean of 0.151 with a 90% CrI [0.095, 0.206], indicating that log(RT) is likely higher in incongruent than in congruent trials. Overall, these results show a clear increase in RT from congruent to incongruent trials, consistent with a Stroop interference effect.
+
+### RT Model 2: language group interaction
+
+Language group and its interaction with condition were added to test whether the Stroop effect differs between L1 and L2 speakers. This allows the size of the Stroop effect to vary across language groups.
+
+```{r}
+#| label: rt-bm-2
+rt_bm_2 <- brm(
+  log(RT) ~ condition * language_group + (condition | participant),
+  family = gaussian,
+  data   = stroop_correct,
+  seed   = my_seed,
+  cores  = 4,
+)
+```
+
+```{r}
+#| label: fig-ce-rt-bm-2
+conditional_effects(rt_bm_2, "condition:language_group")
+```
+
+The plot shows the model-predicted marginal means of log(RT) for each condition separately for L1 and L2 speakers, with points indicating posterior means and vertical intervals representing credible intervals. In terms of patterns, both groups show the same overall trend, with lowest log(RT) in the congruent condition and highest log(RT) in the incongruent condition. However, the increase from congruent to incongruent trials appears larger for L1 speakers than for L2 speakers, suggesting a stronger Stroop effect in L1.
+
+The Stroop effect was estimated separately for each language group, and group differences in this effect were computed from the posterior draws.
+
+```{r}
+#| label: draws-rt-bm-2
+rt_bm_2_draws <- as_draws_df(rt_bm_2) |>
+  mutate(
+    L1_congruent   = b_Intercept + b_conditioncongruent,
+    L1_incongruent = b_Intercept + b_conditionincongruent,
+    L2_congruent   = b_Intercept + b_conditioncongruent +
+                       b_language_groupL2 +
+                       `b_conditioncongruent:language_groupL2`,
+    L2_incongruent = b_Intercept + b_conditionincongruent +
+                       b_language_groupL2 +
+                       `b_conditionincongruent:language_groupL2`,
+    L1_stroop          = L1_incongruent - L1_congruent,
+    L2_stroop          = L2_incongruent - L2_congruent,
+    stroop_L1_minus_L2 = L1_stroop - L2_stroop
+  )
+
+rt_bm_2_draws |>
+  select(L1_stroop, L2_stroop, stroop_L1_minus_L2) |>
+  pivot_longer(everything()) |>
+  group_by(name) |>
+  summarise(
+    mean  = round(mean(value), 3),
+    lower = round(quantile2(value, probs = 0.05), 3),
+    upper = round(quantile2(value, probs = 0.95), 3)
+  )
+```
+
+The Stroop effect for L1 speakers has a mean of 0.213 with a 90% CrI [0.146, 0.279], indicating a clear increase in log(RT) from congruent to incongruent trials. For L2 speakers, the Stroop effect has a mean of 0.064 with a 90% CrI [-0.016, 0.144], indicating greater uncertainty about the presence and size of the effect.
+
+The difference in Stroop effect between groups (L1 minus L2) has a mean of 0.149 with a 90% CrI [0.041, 0.256]. This indicates that the Stroop effect is likely larger in L1 speakers than in L2 speakers. This difference is illustrated in the posterior density plot, where the L1 distribution (green) is shifted further to the right than the L2 distribution (orange), and the difference between groups (L1 - L2; purple) lies mostly above zero.
+
+```{r}
+#| label: fig-stroop-rt-posteriors
+rt_bm_2_draws |>
+  select(L1_stroop, L2_stroop, stroop_L1_minus_L2) |>
+  pivot_longer(everything(), names_to = "estimand", values_to = "value") |>
+  mutate(
+    estimand = factor(estimand,
+      levels = c("L1_stroop", "L2_stroop", "stroop_L1_minus_L2"),
+      labels = c("Stroop effect: L1", "Stroop effect: L2", "Difference (L1 - L2)")
+    )
+  ) |>
+  ggplot(aes(value, fill = estimand)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_density(alpha = 0.6) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    x = "Effect (log-RT scale)", y = "Density", fill = NULL,
+    title = "Posterior Stroop effects by language group (RT)"
+  )
+```
+
+### Accuracy Model 1: overall Stroop effect
+
+```{r}
+#| label: acc-bm-1
+acc_bm_1 <- brm(
+  correct ~ condition + (condition | participant),
+  family = bernoulli,
+  data   = stroop,
+  seed   = my_seed,
+  cores  = 4,
+)
+```
+
+```{r}
+#| label: fig-ce-acc-bm-1
+conditional_effects(acc_bm_1, "condition")
+```
+
+The plot shows the model-predicted probabilities of correct responses for each condition, with points indicating posterior means and vertical intervals representing credible intervals. Accuracy is highest in the congruent condition, slightly lower in the neutral condition, and lowest in the incongruent condition. This indicates that participants are less accurate when the word meaning conflicts with the ink colour, consistent with a Stroop interference effect. The difference between the neutral and congruent conditions appears relatively small, whereas the drop in accuracy for incongruent trials is more pronounced.
+
+```{r}
+#| label: draws-acc-bm-1
+acc_bm_1_draws <- as_draws_df(acc_bm_1) |>
+  mutate(
+    congruent_vs_neutral   = b_conditioncongruent,
+    incongruent_vs_neutral = b_conditionincongruent,
+    stroop_effect          = b_conditionincongruent - b_conditioncongruent
+  )
+
+acc_bm_1_draws |>
+  select(congruent_vs_neutral, incongruent_vs_neutral, stroop_effect) |>
+  pivot_longer(everything()) |>
+  group_by(name) |>
+  summarise(
+    mean  = round(mean(value), 3),
+    lower = round(quantile2(value, probs = 0.05), 3),
+    upper = round(quantile2(value, probs = 0.95), 3)
+  )
+```
+
+The posterior summaries show that the difference between the congruent and neutral conditions is uncertain (M = 0.749, 90% CrI [-0.395, 2.214]). The incongruent condition has lower accuracy than the neutral condition (M = -1.469, 90% CrI [-2.159, -0.773]), indicating that accuracy is likely reduced in incongruent trials. The Stroop effect (incongruent minus congruent) has a mean of -2.219 with a 90% CrI [-3.617, -1.180], indicating that accuracy is likely lower in incongruent than in congruent trials. Overall, these results show a clear decrease in accuracy for incongruent trials, consistent with a Stroop interference effect.
+
+### Accuracy Model 2: language group interaction
+
+```{r}
+#| label: acc-bm-2
+acc_bm_2 <- brm(
+  correct ~ condition * language_group + (condition | participant),
+  family = bernoulli,
+  data   = stroop,
+  seed   = my_seed,
+  cores  = 4,
+)
+```
+
+```{r}
+#| label: fig-ce-acc-bm-2
+conditional_effects(acc_bm_2, "condition:language_group")
+```
+
+The plot shows the model-predicted probabilities of correct responses across conditions for L1 and L2 speakers, with points indicating posterior means and vertical intervals representing credible intervals. Both groups show high accuracy in the neutral and congruent conditions, and lower accuracy in the incongruent condition. The decrease in accuracy for incongruent trials appears slightly larger for L1 speakers than for L2 speakers, although there is substantial overlap in the credible intervals across groups.
+
+```{r}
+#| label: draws-acc-bm-2
+acc_bm_2_draws <- as_draws_df(acc_bm_2) |>
+  mutate(
+    L1_congruent   = b_Intercept + b_conditioncongruent,
+    L1_incongruent = b_Intercept + b_conditionincongruent,
+    L2_congruent   = b_Intercept + b_conditioncongruent +
+                       b_language_groupL2 +
+                       `b_conditioncongruent:language_groupL2`,
+    L2_incongruent = b_Intercept + b_conditionincongruent +
+                       b_language_groupL2 +
+                       `b_conditionincongruent:language_groupL2`,
+    L1_stroop_acc      = L1_incongruent - L1_congruent,
+    L2_stroop_acc      = L2_incongruent - L2_congruent,
+    stroop_L1_minus_L2 = L1_stroop_acc - L2_stroop_acc
+  )
+
+acc_bm_2_draws |>
+  select(L1_stroop_acc, L2_stroop_acc, stroop_L1_minus_L2) |>
+  pivot_longer(everything()) |>
+  group_by(name) |>
+  summarise(
+    mean  = round(mean(value), 3),
+    lower = round(quantile2(value, probs = 0.05), 3),
+    upper = round(quantile2(value, probs = 0.95), 3)
+  )
+```
+
+The Stroop effect for L1 speakers has a mean of -3.103 with a 90% CrI [-5.394, -1.559], indicating a clear reduction in accuracy from congruent to incongruent trials. For L2 speakers, the Stroop effect has a mean of -1.614 with a 90% CrI [-3.498, -0.116], also indicating lower accuracy in incongruent trials, although with greater uncertainty about the size of the effect. The difference in Stroop effect between groups (L1 minus L2) has a mean of -1.489 with a 90% CrI [-3.756, 0.483]. This interval includes both negative and positive values, indicating uncertainty about whether the Stroop effect differs between language groups in accuracy.
+
+```{r}
+acc_bm_2_draws |>
+  select(L1_stroop_acc, L2_stroop_acc, stroop_L1_minus_L2) |>
+  pivot_longer(everything(), names_to = "estimand", values_to = "value") |>
+  mutate(
+    estimand = factor(estimand,
+      levels = c("L1_stroop_acc", "L2_stroop_acc", "stroop_L1_minus_L2"),
+      labels = c("Stroop effect: L1", "Stroop effect: L2", "Difference (L1 - L2)")
+    )
+  ) |>
+  ggplot(aes(value, fill = estimand)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_density(alpha = 0.6) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(
+    x = "Effect (log-odds scale)", y = "Density", fill = NULL,
+    title = "Posterior Stroop effects by language group (accuracy)"
+  )
+```
+
+The density plot shows the posterior distributions of the Stroop effect for each language group and their difference. Both L1 (green) and L2 (orange) distributions are centred below zero, indicating reduced accuracy in incongruent trials. The distribution for the group difference overlaps zero, indicating that both larger effects in L1 and little or no difference between groups are plausible given the data.
+
+## Discussion
+
+**RQ1** The results indicate a Stroop interference effect, providing evidence in support of RH1. In the RT model, the Stroop effect (incongruent minus congruent) had a mean of 0.151 with a 90% CrI [0.095, 0.206], indicating that participants were likely slower on incongruent trials than on congruent trials. A similar pattern was observed for accuracy. The Stroop effect had a mean of -2.219 with a 90% CrI [-3.617, -1.180], indicating that accuracy is likely lower in incongruent than in congruent trials. Taken together, these results show that participants were both slower and less accurate when the word meaning conflicted with the ink colour, consistent with the classic Stroop effect and supporting RH1.
+
+**RQ2** For RT, the results suggest a difference in the Stroop effect between language groups. The difference in Stroop effect between L1 and L2 speakers (L1 minus L2) had a mean of 0.149 with a 90% CrI [0.041, 0.256], suggesting that the effect is likely to be positive, with larger interference in L1 speakers. This is consistent with the idea that lexical access is more automatic in a dominant language. However, this pattern was not observed for accuracy. The group difference in the Stroop effect had a mean of -1.489 with a 90% CrI [-3.756, 0.483]. This interval includes both negative and positive values, indicating substantial uncertainty about the direction of the effect. Therefore, the data do not provide clear evidence for a difference between language groups in accuracy. Overall, RH2 is partially supported: there is evidence for a larger Stroop effect in L1 speakers in RT, but not in accuracy.
+
+The absence of a clear group difference in accuracy may reflect ceiling effects, as overall accuracy was high across conditions. When performance is near ceiling, accuracy becomes less sensitive to underlying differences, making RT a more informative measure. 
+
+Several limitations should be considered. First, the L2 sample was small (n = 8), which increases uncertainty in the estimates and reduces power to detect group differences. Second, all L2 participants reported high proficiency, which may have reduced differences between groups. Highly proficient L2 speakers are often reported to show Stroop effects similar to L1 speakers, potentially attenuating the expected effect. 
+
+In summary, the results indicate a Stroop interference effect in both RT and accuracy, supporting RH1. There is also evidence that this effect is larger in L1 than L2 speakers in RT, but not in accuracy, providing partial support for RH2. These findings suggest that language dominance influences the magnitude of interference in RT, while effects on accuracy remain uncertain under the present conditions.
+
+## References
